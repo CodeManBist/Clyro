@@ -103,4 +103,63 @@ describe("scanRepository", () => {
     expect(summary.files).toEqual([]);
     expect(summary.directories).toEqual([]);
   });
+
+  
+it("detects all JavaScript and TypeScript source extensions", async () => {
+  const extensions = [
+    ".ts",
+    ".tsx",
+    ".mts",
+    ".cts",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+  ];
+
+  for (const extension of extensions) {
+    await writeFile(
+      path.join(repositoryRoot, `file${extension}`),
+      "",
+    );
+  }
+
+  const summary = await scanRepository(repositoryRoot);
+
+  expect(summary.files).toHaveLength(8);
+  expect(summary.typescriptFiles).toBe(4);
+  expect(summary.javascriptFiles).toBe(4);
+  expect(summary.tsxFiles).toBe(1);
+});
+
+  
+  it("counts all supported TypeScript and JavaScript extensions", async () => {
+    await mkdir(path.join(repositoryRoot, "src"));
+  
+    const extensions = [
+      ".ts",
+      ".tsx",
+      ".mts",
+      ".cts",
+      ".js",
+      ".jsx",
+      ".mjs",
+      ".cjs",
+    ];
+  
+    for (const extension of extensions) {
+      await writeFile(
+        path.join(repositoryRoot, "src", `file${extension}`),
+        "",
+      );
+    }
+  
+    const summary = await scanRepository(repositoryRoot);
+  
+    expect(summary.typescriptFiles).toBe(4);
+    expect(summary.javascriptFiles).toBe(4);
+    expect(summary.tsxFiles).toBe(1);
+    expect(summary.totalFiles).toBe(8);
+  });
+  
 });
