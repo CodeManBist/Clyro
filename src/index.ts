@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { scanRepository } from "./repository/scanner.js";
+import { detectProject } from "./repository/project-detector.js";
 
 const program = new Command();
 
@@ -9,23 +10,65 @@ program
   .command("inspect")
   .description("Inspect the current repository")
   .action(async () => {
-    const summary = await scanRepository(process.cwd());
+    const rootPath = process.cwd();
 
-    console.log("Repository summary");
+    // Step 1: Scan repository
+    const summary = await scanRepository(rootPath);
+
+    // Step 2: Detect project metadata
+    const profile = await detectProject(rootPath, summary);
+
+    console.log("\nRepository summary");
     console.log(`Root: ${summary.rootPath}`);
     console.log(`Files: ${summary.totalFiles}`);
     console.log(`Directories: ${summary.totalDirectories}`);
     console.log(`TypeScript files: ${summary.typescriptFiles}`);
     console.log(`TSX files: ${summary.tsxFiles}`);
+
+    console.log("\nProject profile");
+    console.log(`Package manager: ${profile.packageManager}`);
+    console.log(`Module type: ${profile.moduleType}`);
+    console.log(`Test runner: ${profile.testRunner}`);
+
+    console.log(
+      `Scripts: ${Object.keys(profile.scripts).join(", ") || "None"}`,
+    );
+
+    console.log(
+      `Frameworks: ${profile.frameworks.join(", ") || "None detected"}`,
+    );
+
+    console.log(
+      `Entry points: ${
+        profile.entryPoints.map((entry) => `${entry.path} (${entry.source})`).join(", ") ||
+        "None detected"
+      }`,
+    );
+
+    console.log(`TypeScript config: ${profile.hasTsconfig ? "Yes" : "No"}`);
+
+    console.log(
+      `Workspaces: ${profile.workspaces.join(", ") || "None detected"}`,
+    );
+
+    if (profile.warnings.length > 0) {
+      console.log("\nWarnings:");
+      profile.warnings.forEach((warning) => console.log(`- ${warning}`));
+    }
   });
 
 const args = process.argv.slice(2);
+
 if (args[0] === "--") {
   args.shift();
 }
 
 program
-  .parseAsync([process.argv[0] ?? "node", process.argv[1] ?? "clyro", ...args])
+  .parseAsync([
+    process.argv[0] ?? "node",
+    process.argv[1] ?? "clyro",
+    ...args,
+  ])
   .catch((error: unknown) => {
     console.error(error);
     process.exitCode = 1;
