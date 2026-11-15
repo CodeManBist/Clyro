@@ -1,8 +1,24 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from "vitest";
+
 import { scanRepository } from "../src/repository/scanner.js";
+import { detectProject } from "../src/repository/project-detector.js";
 
 describe("scanRepository", () => {
   let temporaryDirectory: string;
@@ -104,7 +120,7 @@ describe("scanRepository", () => {
     expect(summary.directories).toEqual([]);
   });
 
-  
+
 it("detects all JavaScript and TypeScript source extensions", async () => {
   const extensions = [
     ".ts",
@@ -132,10 +148,10 @@ it("detects all JavaScript and TypeScript source extensions", async () => {
   expect(summary.tsxFiles).toBe(1);
 });
 
-  
+
   it("counts all supported TypeScript and JavaScript extensions", async () => {
     await mkdir(path.join(repositoryRoot, "src"));
-  
+
     const extensions = [
       ".ts",
       ".tsx",
@@ -146,20 +162,69 @@ it("detects all JavaScript and TypeScript source extensions", async () => {
       ".mjs",
       ".cjs",
     ];
-  
+
     for (const extension of extensions) {
       await writeFile(
         path.join(repositoryRoot, "src", `file${extension}`),
         "",
       );
     }
-  
+
     const summary = await scanRepository(repositoryRoot);
-  
+
     expect(summary.typescriptFiles).toBe(4);
     expect(summary.javascriptFiles).toBe(4);
     expect(summary.tsxFiles).toBe(1);
     expect(summary.totalFiles).toBe(8);
   });
-  
+
+
+  it("uses packageManager from package.json over the lockfile", async () => {
+    await writeFile(
+      path.join(repositoryRoot, "package.json"),
+      JSON.stringify({
+        packageManager: "pnpm@10.28.1",
+        type: "module",
+      }),
+    );
+
+    await writeFile(
+      path.join(repositoryRoot, "package-lock.json"),
+      "{}",
+    );
+
+    const profile = await detectProject(
+      repositoryRoot,
+      await scanRepository(repositoryRoot),
+    );
+
+    expect(profile.packageManager).toBe("pnpm");
+    expect(profile.moduleType).toBe("esm");
+  });
+
+  it("handles missing package.json gracefully", async () => {
+    const profile = await detectProject(
+      repositoryRoot,
+      await scanRepository(repositoryRoot),
+    );
+
+    expect(profile.packageManager).toBe("unknown");
+    expect(profile.moduleType).toBe("unknown");
+  });
+
+  it("handles malformed package.json without crashing", async () => {
+    await writeFile(
+      path.join(repositoryRoot, "package.json"),
+      "{ invalid json",
+    );
+
+    const profile = await detectProject(
+      repositoryRoot,
+      await scanRepository(repositoryRoot),
+    );
+
+    expect(profile.packageManager).toBe("unknown");
+    expect(profile.warnings.length).toBeGreaterThan(0);
+  });
+
 });
