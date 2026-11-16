@@ -93,6 +93,47 @@ keyword scorer, so it should be treated as a navigation aid rather than a
 relevance guarantee. See [`docs/ranker-baseline.md`](./docs/ranker-baseline.md)
 for the measured fixture baseline.
 
+### Security foundation and read-only tools
+
+`src/security/path-guard.ts` canonicalizes repository paths and rejects lexical
+escapes and paths whose resolved symlink target is outside the repository.
+`src/security/secrets.ts` filters known sensitive paths, including `.env*`
+files, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa*`, `id_ed25519*`,
+credential files, private key extensions (`.pem`, `.key`, `.p12`), and `.aws/`,
+`.ssh/`, and `.git/` directories. Safe `.env.example` and `.env.sample` files
+remain readable.
+`src/security/redact.ts` removes recognizable API tokens, access keys, bearer
+values, PEM private keys, credential URLs, secret environment assignments, and
+the current `GEMINI_API_KEY` value before tool output is returned.
+
+All developer tools are dispatched through `src/tools/registry.ts`. The
+registry checks the phase and permission, validates arguments, applies a
+timeout and cancellation signal, bounds output, redacts it, and returns
+structured errors. `read_file`, `list_files`, and `search_code` are read-only;
+they do not invoke a shell or modify repository files. The internal `tool`
+command is hidden from normal CLI help and can be used during development:
+
+```bash
+pnpm dev tool read_file '{"path":"src/index.ts"}'
+pnpm dev tool list_files '{"path":"src"}'
+pnpm dev tool search_code '{"pattern":"detectProject"}'
+```
+
+`read_file` refuses files over 1 MB and returns at most 8,000 content
+characters. `list_files` defaults to 200 paths and a depth of 8.
+`list_files` and `search_code` scan at most 10,000 paths per call.
+`search_code` reads source files up to 1 MB each, limits results to 100, and
+supports literal matching by default or regex with `"regex":true`; regex
+patterns are capped at 200 characters and intentionally reject nested groups,
+backreferences, and common nested-quantifier patterns. All tool output is
+bounded to 16,000 characters by the registry.
+
+Path checks reduce traversal and symlink escape risk, but filesystem checks and
+subsequent reads are separate operations, so a time-of-check/time-of-use race
+(TOCTOU) remains. Redaction and sensitive-path filtering are heuristic defense
+in depth, not a guarantee that every secret is detected. Clyro is not an
+operating-system sandbox.
+
 ### Repository inspection
 
 [`src/repository/scanner.ts`](./src/repository/scanner.ts) recursively scans a

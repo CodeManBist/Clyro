@@ -3,6 +3,9 @@ import { scanRepository } from "./repository/scanner.js";
 import { detectProject } from "./repository/project-detector.js";
 import { buildImportGraph } from "./repository/import-graph.js";
 import { rankFiles } from "./context/ranker.js";
+import { PathGuard } from "./security/path-guard.js";
+import { createReadOnlyToolRegistry } from "./tools/create-registry.js";
+import type { ToolContext } from "./tools/types.js";
 
 const program = new Command();
 
@@ -68,6 +71,39 @@ program
         for (const reason of file.reasons) console.log(`  - ${reason}`);
       }
       if (ranked.length === 0) console.log("No relevant source files found.");
+    }
+  });
+
+program
+  .command("tool", { hidden: true })
+  .description("Internal read-only developer tools")
+  .argument("<name>")
+  .argument("<json-args>")
+  .action(async (name: string, jsonArgs: string) => {
+    const repositoryRoot = process.cwd();
+    const controller = new AbortController();
+    const context: ToolContext = {
+      pathGuard: await PathGuard.create(repositoryRoot),
+      repositoryRoot,
+      phase: "investigate",
+      limits: {
+        maxOutputChars: 16_000,
+        maxFileBytes: 1_000_000,
+        maxReadOutputChars: 8_000,
+        maxSearchMatches: 100,
+        maxListResults: 200,
+        maxDirectoryDepth: 8,
+      },
+      signal: controller.signal,
+      filesRead: new Map(),
+    };
+    let args: unknown;
+    try { args = JSON.parse(jsonArgs); } catch { args = undefined; }
+    const result = await createReadOnlyToolRegistry().execute(name, args, context);
+    if (result.ok) console.log(result.output);
+    else {
+      console.log(`error ${result.error.code}: ${result.error.message}`);
+      process.exitCode = 1;
     }
   });
 
