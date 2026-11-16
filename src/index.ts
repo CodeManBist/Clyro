@@ -1,6 +1,8 @@
 import { Command } from "commander";
 import { scanRepository } from "./repository/scanner.js";
 import { detectProject } from "./repository/project-detector.js";
+import { buildImportGraph } from "./repository/import-graph.js";
+import { rankFiles } from "./context/ranker.js";
 
 const program = new Command();
 
@@ -9,7 +11,8 @@ program.name("clyro").description("A local-first AI coding agent CLI");
 program
   .command("inspect")
   .description("Inspect the current repository")
-  .action(async () => {
+  .option("--rank <task>", "Rank files relevant to a task")
+  .action(async (options: { rank?: string }) => {
     const rootPath = process.cwd();
 
     // Step 1: Scan repository
@@ -54,6 +57,17 @@ program
     if (profile.warnings.length > 0) {
       console.log("\nWarnings:");
       profile.warnings.forEach((warning) => console.log(`- ${warning}`));
+    }
+
+    if (options.rank !== undefined) {
+      const graph = await buildImportGraph(rootPath, summary.files);
+      const ranked = await rankFiles(options.rank, summary, graph, summary.files);
+      console.log(`\nRelevant files for: ${options.rank}`);
+      for (const file of ranked.slice(0, 10)) {
+        console.log(`\n${file.path}  (${file.score.toFixed(2)})`);
+        for (const reason of file.reasons) console.log(`  - ${reason}`);
+      }
+      if (ranked.length === 0) console.log("No relevant source files found.");
     }
   });
 

@@ -74,6 +74,25 @@ pnpm test     Run Vitest
 
 ## Current capabilities
 
+### Import graph and task-based ranking
+
+`clyro inspect --rank "fix login validation"` builds a local import graph for
+JavaScript and TypeScript sources, then ranks files using path and filename
+matches, exported identifiers, bounded content matches, nearby import graph
+relationships, paired test names, and small penalties for generated or
+declaration files. Results show scores and the reasons that contributed to
+them. The ordinary `clyro inspect` output remains available without `--rank`.
+
+The resolver supports relative source imports, extension probing, directory
+index files, JavaScript-to-TypeScript mappings, and basic `tsconfig.json`
+`baseUrl`/`paths` aliases. Bare specifiers are treated as external packages;
+unresolved relative specifiers are retained. It does not implement full Node,
+package exports, workspace package, or TypeScript project-reference resolution.
+Ranking reads source contents only up to 200 KB per file and uses a small
+keyword scorer, so it should be treated as a navigation aid rather than a
+relevance guarantee. See [`docs/ranker-baseline.md`](./docs/ranker-baseline.md)
+for the measured fixture baseline.
+
 ### Repository inspection
 
 [`src/repository/scanner.ts`](./src/repository/scanner.ts) recursively scans a
