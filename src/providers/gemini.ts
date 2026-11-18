@@ -45,6 +45,9 @@ export class GeminiProvider implements ModelProvider {
     if (!config.apiKey.trim()) throw new Error("GEMINI_API_KEY is not set. Add it to your environment or .env file.");
     this.model = options.model?.trim() || config.model;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    if (!Number.isInteger(this.timeoutMs) || this.timeoutMs < 1 || this.timeoutMs > 2 ** 32 - 1) {
+      throw new RangeError("timeoutMs must be an integer between 1 and 4294967295");
+    }
     this.client = options.client ?? new GoogleGenAIClient({
       apiKey: config.apiKey,
       vertexai: false,

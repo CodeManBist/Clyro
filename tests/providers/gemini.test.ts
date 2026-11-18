@@ -216,13 +216,33 @@ describe("GeminiProvider", () => {
     const controller = new AbortController();
     const generateContent = vi.fn().mockImplementation(({ config }) => {
       expect(config.abortSignal).toBeInstanceOf(AbortSignal);
-      controller.abort();
-      return Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      return new Promise((_resolve, reject) => {
+        config.abortSignal.addEventListener("abort", () => reject(config.abortSignal.reason), { once: true });
+        setTimeout(() => controller.abort(new Error("caller cancelled")), 0);
+      });
     });
     const client = { models: { generateContent } } as unknown as Pick<GoogleGenAI, "models">;
     const provider = new GeminiProvider({ apiKey: "test", client, timeoutMs: 1000 });
-    await expect(provider.generate({ system: "", messages: [], tools: [], signal: controller.signal })).rejects.toThrow();
+    await expect(provider.generate({ system: "", messages: [], tools: [], signal: controller.signal }))
+      .rejects.toThrow("caller cancelled");
     expect(generateContent).toHaveBeenCalledOnce();
+  });
+
+  it("aborts an in-flight request when its deadline expires", async () => {
+    const generateContent = vi.fn().mockImplementation(({ config }) => new Promise((_resolve, reject) => {
+      config.abortSignal.addEventListener("abort", () => reject(config.abortSignal.reason), { once: true });
+    }));
+    const client = { models: { generateContent } } as unknown as Pick<GoogleGenAI, "models">;
+    const provider = new GeminiProvider({ apiKey: "test", client, timeoutMs: 15 });
+
+    await expect(provider.generate({ system: "", messages: [], tools: [] }))
+      .rejects.toMatchObject({ name: "TimeoutError" });
+    expect(generateContent).toHaveBeenCalledOnce();
+  });
+
+  it("rejects invalid request deadlines", () => {
+    expect(() => new GeminiProvider({ apiKey: "test", timeoutMs: 0, client: { models: { generateContent: vi.fn() } } as unknown as Pick<GoogleGenAI, "models"> }))
+      .toThrow(/timeoutMs must be an integer/);
   });
 
   it("omits temperature for Gemini 3 models", async () => {

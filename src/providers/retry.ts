@@ -1,4 +1,3 @@
-
 export interface RetryOptions {
   maxAttempts?: number;
   baseDelayMs?: number;
@@ -6,18 +5,70 @@ export interface RetryOptions {
   signal?: AbortSignal;
 }
 
-function isRetryableError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
+function statusFrom(error: unknown, seen = new Set<object>()): number | undefined {
+  if (!error || typeof error !== "object" || seen.has(error)) return undefined;
+  seen.add(error);
+
+  const value = error as Record<string, unknown>;
+  for (const candidate of [value.status, value.code]) {
+    if (typeof candidate === "number" && Number.isInteger(candidate)) return candidate;
   }
 
-  const status = (error as { status?: number }).status;
+  for (const nested of [value.response, value.error, value.cause]) {
+    const status = statusFrom(nested, seen);
+    if (status !== undefined) return status;
+  }
+  return undefined;
+}
 
+function isRetryableError(error: unknown): boolean {
+  const status = statusFrom(error);
   return status === 429 || (status !== undefined && status >= 500 && status <= 599);
 }
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function readHeader(headers: unknown, name: string): string | undefined {
+  if (!headers || typeof headers !== "object") return undefined;
+  const headerBag = headers as { get?: (key: string) => string | null } & Record<string, unknown>;
+  if (typeof headerBag.get === "function") return headerBag.get(name) ?? undefined;
+  const key = Object.keys(headerBag).find((item) => item.toLowerCase() === name.toLowerCase());
+  return key && typeof headerBag[key] === "string" ? headerBag[key] as string : undefined;
+}
+
+function parseRetryAfter(value: string | undefined, now = Date.now()): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - now) : undefined;
+}
+
+/**
+ * SDK v3.3.0's ApiError does not expose response headers. This supports
+ * transports/wrappers that retain Retry-After or Retry-After-Ms metadata.
+ */
+function retryAfterMsFrom(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const value = error as Record<string, unknown>;
+  if (typeof value.retryAfterMs === "number" && Number.isFinite(value.retryAfterMs) && value.retryAfterMs >= 0) {
+    return value.retryAfterMs;
+  }
+  const directRetryAfter = parseRetryAfter(typeof value.retryAfter === "string" ? value.retryAfter : undefined);
+  if (directRetryAfter !== undefined) return directRetryAfter;
+
+  const response = value.response && typeof value.response === "object"
+    ? value.response as Record<string, unknown>
+    : undefined;
+  const headers = value.headers ?? response?.headers;
+  const milliseconds = readHeader(headers, "retry-after-ms");
+  if (milliseconds !== undefined) {
+    const parsed = Number(milliseconds);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return parseRetryAfter(readHeader(headers, "retry-after"));
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -27,21 +78,16 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       return;
     }
 
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
     const timer = setTimeout(() => {
       cleanup();
       resolve();
     }, ms);
-
     const onAbort = () => {
       clearTimeout(timer);
       cleanup();
       reject(signal?.reason ?? new Error("Operation aborted"));
     };
-
-    const cleanup = () => {
-      signal?.removeEventListener("abort", onAbort);
-    };
-
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
@@ -57,31 +103,28 @@ export async function withRetry<T>(
     signal,
   } = options;
 
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new RangeError("maxAttempts must be a positive integer");
+  }
+  if (!Number.isFinite(baseDelayMs) || baseDelayMs < 0 || !Number.isFinite(maxDelayMs) || maxDelayMs < 0) {
+    throw new RangeError("Retry delays must be finite non-negative numbers");
+  }
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    if (signal?.aborted) {
-      throw signal.reason ?? new Error("Operation aborted");
-    }
+    if (signal?.aborted) throw signal.reason ?? new Error("Operation aborted");
 
     try {
       return await operation();
     } catch (error) {
-      if (
-        attempt === maxAttempts ||
-        !isRetryableError(error) ||
-        isAbortError(error) ||
-        signal?.aborted
-      ) {
+      if (attempt === maxAttempts || !isRetryableError(error) || isAbortError(error) || signal?.aborted) {
         throw error;
       }
 
-      const exponentialDelay = Math.min(
-        maxDelayMs,
-        baseDelayMs * 2 ** (attempt - 1),
-      );
-
-      // Full jitter: random delay between zero and the exponential cap.
-      const delay = Math.random() * exponentialDelay;
-
+      const exponentialCap = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
+      const serverDelay = retryAfterMsFrom(error);
+      const delay = serverDelay === undefined
+        ? Math.random() * exponentialCap
+        : Math.min(maxDelayMs, serverDelay);
       await sleep(delay, signal);
     }
   }
