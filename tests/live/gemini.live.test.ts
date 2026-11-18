@@ -1,0 +1,18 @@
+import "dotenv/config";
+import { describe, expect, it } from "vitest";
+import { GeminiProvider } from "../../src/providers/gemini.js";
+
+describe.runIf(process.env.GEMINI_LIVE === "1")("Gemini live API", () => {
+  it("returns a response from the configured Gemini model", async () => {
+    const provider = new GeminiProvider();
+    const response = await provider.generate({
+      system: "Reply with only OK.",
+      messages: [{ role: "user", text: "Ping" }],
+      tools: [],
+      maxOutputTokens: 8,
+      temperature: 0,
+    });
+    expect(response.finishReason).toBe("stop");
+    expect(response.text).toBeTruthy();
+  }, 90_000);
+});

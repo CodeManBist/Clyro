@@ -7,11 +7,14 @@
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "vitest run tests"
+    "test": "vitest run tests/providers tests/security tests/tools",
+    "test:live": "vitest run tests/live"
   },
   "dependencies": {
-    "typescript": "npm:@typescript/typescript6@6.0.2",
+    "@google/genai": "^3.3.0",
     "commander": "15.1.0",
+    "dotenv": "^18.0.10",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {

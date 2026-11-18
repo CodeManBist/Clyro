@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { Command } from "commander";
 import { scanRepository } from "./repository/scanner.js";
 import { detectProject } from "./repository/project-detector.js";
@@ -6,10 +7,13 @@ import { rankFiles } from "./context/ranker.js";
 import { PathGuard } from "./security/path-guard.js";
 import { createReadOnlyToolRegistry } from "./tools/create-registry.js";
 import type { ToolContext } from "./tools/types.js";
+import { runPing } from "./cli/commands/ping.js";
 
 const program = new Command();
 
 program.name("clyro").description("A local-first AI coding agent CLI");
+
+program.command("ping").description("Check Gemini provider connectivity").action(runPing);
 
 program
   .command("inspect")
