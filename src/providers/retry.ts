@@ -5,25 +5,65 @@ export interface RetryOptions {
   signal?: AbortSignal;
 }
 
-function statusFrom(error: unknown, seen = new Set<object>()): number | undefined {
+export function getProviderErrorStatus(error: unknown, seen = new Set<object>()): number | undefined {
   if (!error || typeof error !== "object" || seen.has(error)) return undefined;
   seen.add(error);
 
   const value = error as Record<string, unknown>;
-  for (const candidate of [value.status, value.code]) {
-    if (typeof candidate === "number" && Number.isInteger(candidate)) return candidate;
+  const status = toHttpStatus(value.status);
+  if (status !== undefined) return status;
+
+  // Some wrappers put the HTTP code inside their structured API error body.
+  if (value.error && typeof value.error === "object") {
+    const payload = value.error as Record<string, unknown>;
+    const payloadStatus = toHttpStatus(payload.status) ?? toHttpStatus(payload.code);
+    if (payloadStatus !== undefined) return payloadStatus;
   }
 
   for (const nested of [value.response, value.error, value.cause]) {
-    const status = statusFrom(nested, seen);
+    const status = getProviderErrorStatus(nested, seen);
     if (status !== undefined) return status;
   }
   return undefined;
 }
 
-function isRetryableError(error: unknown): boolean {
-  const status = statusFrom(error);
-  return status === 429 || (status !== undefined && status >= 500 && status <= 599);
+function errorClassName(error: object): string | undefined {
+  const constructorName = (error as { constructor?: { name?: unknown } }).constructor?.name;
+  return typeof constructorName === "string" ? constructorName : undefined;
+}
+
+const TRANSIENT_NETWORK_CODES = new Set([
+  "ECONNRESET", "ETIMEDOUT", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH",
+  "ECONNREFUSED", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET",
+]);
+
+function hasTransientNetworkFailure(error: unknown, seen = new Set<object>()): boolean {
+  if (!error || typeof error !== "object" || seen.has(error)) return false;
+  seen.add(error);
+  const record = error as Record<string, unknown>;
+  const type = errorClassName(error);
+  if (type === "APIConnectionError" || type === "APIConnectionTimeoutError") return true;
+  if (typeof record.code === "string" && TRANSIENT_NETWORK_CODES.has(record.code)) return true;
+  return hasTransientNetworkFailure(record.cause, seen);
+}
+
+export function isRetryableProviderError(error: unknown): boolean {
+  if (!error || typeof error !== "object" || isAbortError(error)) return false;
+  const status = getProviderErrorStatus(error);
+  return status === 408 || status === 429 || (status !== undefined && status >= 500 && status <= 599)
+    || isProviderTimeout(error)
+    || hasTransientNetworkFailure(error);
+}
+
+function toHttpStatus(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599
+    ? value
+    : undefined;
+}
+
+function isProviderTimeout(error: object): boolean {
+  const namedError = error as { name?: unknown };
+  return namedError.name === "TimeoutError" || errorClassName(error) === "APIConnectionTimeoutError";
 }
 
 function isAbortError(error: unknown): boolean {
@@ -116,7 +156,7 @@ export async function withRetry<T>(
     try {
       return await operation();
     } catch (error) {
-      if (attempt === maxAttempts || !isRetryableError(error) || isAbortError(error) || signal?.aborted) {
+      if (attempt === maxAttempts || !isRetryableProviderError(error) || signal?.aborted) {
         throw error;
       }
 

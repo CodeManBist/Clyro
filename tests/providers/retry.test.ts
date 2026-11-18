@@ -1,7 +1,8 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { ApiError } from "@google/genai";
-import { withRetry } from "../../src/providers/retry.js";
+import { APIConnectionError, RateLimitError } from "groq-sdk";
+import { getProviderErrorStatus, isRetryableProviderError, withRetry } from "../../src/providers/retry.js";
 
 function httpError(status: number): Error & { status: number } {
   return Object.assign(new Error(`HTTP ${status}`), { status });
@@ -45,6 +46,33 @@ describe("withRetry", () => {
       withRetry(operation, { baseDelayMs: 1 }),
     ).resolves.toBe("success");
 
+    expect(operation).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a request-timeout status", async () => {
+    const operation = vi.fn().mockRejectedValueOnce(new ApiError({ status: 408, message: "timeout" })).mockResolvedValue("success");
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await expect(withRetry(operation, { baseDelayMs: 1 })).resolves.toBe("success");
+    expect(operation).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not treat a DOMException numeric code as an HTTP status", async () => {
+    const aborted = new DOMException("request aborted", "AbortError");
+    expect(getProviderErrorStatus(aborted)).toBeUndefined();
+    expect(isRetryableProviderError(aborted)).toBe(false);
+    const timeout = new DOMException("request deadline expired", "TimeoutError");
+    expect(getProviderErrorStatus(timeout)).toBeUndefined();
+    expect(isRetryableProviderError(timeout)).toBe(true);
+    const operation = vi.fn().mockRejectedValueOnce(timeout).mockResolvedValue("recovered");
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await expect(withRetry(operation, { baseDelayMs: 1 })).resolves.toBe("recovered");
+    expect(operation).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries the Groq SDK connection error class", async () => {
+    const operation = vi.fn().mockRejectedValueOnce(new APIConnectionError({ message: "connection reset" })).mockResolvedValue("success");
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await expect(withRetry(operation, { baseDelayMs: 1 })).resolves.toBe("success");
     expect(operation).toHaveBeenCalledTimes(2);
   });
 
@@ -107,9 +135,7 @@ describe("withRetry", () => {
   it("honors exposed Retry-After headers within the configured delay bound", async () => {
     vi.useFakeTimers();
     const operation = vi.fn()
-      .mockRejectedValueOnce(Object.assign(new ApiError({ status: 429, message: "busy" }), {
-        response: { headers: new Headers({ "retry-after": "2" }) },
-      }))
+      .mockRejectedValueOnce(new RateLimitError(429, undefined, "busy", new Headers({ "retry-after": "2" })))
       .mockResolvedValue("recovered");
     const retry = withRetry(operation, { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 5_000 });
 

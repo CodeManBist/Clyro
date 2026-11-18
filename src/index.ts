@@ -13,7 +13,7 @@ const program = new Command();
 
 program.name("clyro").description("A local-first AI coding agent CLI");
 
-program.command("ping").description("Check Gemini provider connectivity").action(runPing);
+program.command("ping").description("Check configured model provider connectivity").action(runPing);
 
 program
   .command("inspect")

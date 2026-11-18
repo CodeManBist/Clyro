@@ -230,7 +230,7 @@ describe("GeminiProvider", () => {
 
   it("aborts an in-flight request when its deadline expires", async () => {
     const generateContent = vi.fn().mockImplementation(({ config }) => new Promise((_resolve, reject) => {
-      config.abortSignal.addEventListener("abort", () => reject(config.abortSignal.reason), { once: true });
+      config.abortSignal.addEventListener("abort", () => reject(new DOMException("This operation was aborted", "AbortError")), { once: true });
     }));
     const client = { models: { generateContent } } as unknown as Pick<GoogleGenAI, "models">;
     const provider = new GeminiProvider({ apiKey: "test", client, timeoutMs: 15 });

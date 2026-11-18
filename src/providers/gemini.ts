@@ -51,7 +51,7 @@ export class GeminiProvider implements ModelProvider {
     this.client = options.client ?? new GoogleGenAIClient({
       apiKey: config.apiKey,
       vertexai: false,
-      httpOptions: { timeout: this.timeoutMs, retryOptions: { attempts: 1 } },
+      httpOptions: { retryOptions: { attempts: 1 } },
     });
   }
 
@@ -62,8 +62,9 @@ export class GeminiProvider implements ModelProvider {
       ? toGeminiFunctionDeclarations(request.tools)
       : undefined;
 
-    const response = await withRetry(
-      () => this.client.models.generateContent({
+    try {
+      const response = await withRetry(
+        () => this.client.models.generateContent({
         model: this.model,
         contents: toGeminiContents(request.messages),
         config: {
@@ -71,13 +72,17 @@ export class GeminiProvider implements ModelProvider {
           maxOutputTokens: request.maxOutputTokens,
           ...(supportsTemperature(this.model) ? { temperature: request.temperature } : {}),
           abortSignal: signal,
-          httpOptions: { timeout: this.timeoutMs, retryOptions: { attempts: 1 } },
+          httpOptions: { retryOptions: { attempts: 1 } },
           tools: functionDeclarations ? [{ functionDeclarations }] : undefined,
         },
-      }),
-      { signal },
-    );
-    return fromGeminiResponse(response);
+        }),
+        { signal },
+      );
+      return fromGeminiResponse(response);
+    } catch (error) {
+      if (deadline.aborted && !request.signal?.aborted) throw deadline.reason ?? error;
+      throw error;
+    }
   }
 }
 

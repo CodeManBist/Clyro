@@ -4,12 +4,15 @@ Clyro is an early TypeScript/Node.js CLI prototype for an AI coding agent.
 
 ## Current status
 
-Clyro is currently a repository-inspection prototype, not yet a complete AI
-coding agent.
+Clyro is an early TypeScript/Node.js CLI prototype. Provider connectivity and
+failover are implemented; the interactive coding-agent loop is still in
+progress.
 
 ### Completed
 
 - TypeScript CLI foundation
+- Gemini and Groq model providers behind the provider-neutral interface
+- Configurable transient-error fallback and provider connectivity checks
 - Recursive repository scanning
 - JavaScript and TypeScript file classification
 - Basic package-manager detection
@@ -20,13 +23,10 @@ coding agent.
 
 - Project metadata detection exists, but most profile fields are placeholders.
 - An agent function exists, but it is not connected to the CLI.
-- The README examples previously described capabilities that were not yet
-  implemented; the actual commands are documented below.
 
 ### Not started
 
-- LLM/provider integration
-- Interactive coding-agent loop
+- Interactive agent loop using the provider integration
 - File editing
 - Shell/tool execution
 - Planning, approvals, diffs, rollback, persistence, and packaging
@@ -43,6 +43,48 @@ Inspect the current repository:
 
 ```bash
 pnpm dev inspect
+```
+
+Check the configured model provider:
+
+```bash
+pnpm dev ping
+```
+
+## Model provider configuration
+
+Copy `.env.example` to `.env` and set the API key for each configured provider.
+Obtain a Gemini API key in [Google AI Studio](https://aistudio.google.com/apikey)
+and a Groq API key in the [Groq Console](https://console.groq.com/keys).
+Never commit `.env` or paste API keys into diagnostics.
+
+```env
+AI_PROVIDER=gemini
+AI_FALLBACK_PROVIDER=groq
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.8-flash
+GROQ_API_KEY=
+GROQ_MODEL=openai/gpt-oss-120b
+```
+
+`AI_PROVIDER` selects the primary (`gemini` or `groq`). Set
+`AI_FALLBACK_PROVIDER` to the other provider to enable automatic failover.
+For a single-provider setup, leave `AI_FALLBACK_PROVIDER` blank. Configure a
+valid key for every selected provider, including the fallback.
+
+Clyro retries transient 408, 429, 5xx and recognized network failures within
+the primary provider first, then attempts the fallback at most once. Permanent
+4xx failures, authentication errors, invalid schemas and safety-blocked model
+responses do not trigger fallback. Tool execution is outside this layer and is
+never repeated by provider failover. Availability, model access, rates and any
+free-tier limits depend on each provider's current account and service policy.
+
+Optional live smoke tests are excluded from `pnpm test` and run only when their
+provider flag is set:
+
+```bash
+GEMINI_LIVE=1 pnpm exec vitest run tests/live/gemini.live.test.ts
+GROQ_LIVE=1 pnpm exec vitest run tests/live/groq.live.test.ts
 ```
 
 Build the TypeScript source:
@@ -243,9 +285,7 @@ currently empty.
 
 There is currently no:
 
-- Model provider layer
 - Prompt or context builder
-- Tool registry
 - File-operation layer
 - Shell-command layer
 - Interactive conversation loop
@@ -259,7 +299,7 @@ There is currently no:
 | Path | Purpose |
 |---|---|
 | [`src/`](./src/) | TypeScript application source |
-| [`src/index.ts`](./src/index.ts) | Commander CLI setup and `inspect` command |
+| [`src/index.ts`](./src/index.ts) | Commander CLI setup, provider `ping`, and `inspect` commands |
 | [`src/agent.ts`](./src/agent.ts) | Placeholder agent function |
 | [`src/repository/scanner.ts`](./src/repository/scanner.ts) | Filesystem traversal and source-file classification |
 | [`src/repository/project-detector.ts`](./src/repository/project-detector.ts) | Package manager and project metadata detection |
@@ -335,7 +375,6 @@ as `pnpm dev -- "Explain this codebase"` do not currently invoke an AI agent.
 
 ### Core coding-agent features not implemented
 
-- LLM/API integration
 - User conversation loop
 - Repository context selection
 - Reading files for model context
@@ -346,7 +385,6 @@ as `pnpm dev -- "Explain this codebase"` do not currently invoke an AI agent.
 - Showing diffs
 - Requesting user approval
 - Conversation history
-- Configuration and API-key management
 - Git safety checks
 - Cross-platform packaging
 
@@ -382,17 +420,16 @@ Generated `dist/` and `node_modules/` are ignored by
 The next highest-value milestone is to connect a safe, minimal agent loop to
 the existing CLI:
 
-1. Add a real `ask` command or default task input.
-2. Introduce a model-provider interface.
-3. Collect repository context using the existing scanner.
-4. Add read-only tools:
+1. Add a real `ask` command or default task input using the existing provider layer.
+2. Collect repository context using the existing scanner.
+3. Add read-only tools:
    - List files
    - Read files
    - Search files
-5. Add structured tool-call handling.
-6. Add approval-gated file editing.
-7. Add command execution with explicit approval.
-8. Add end-to-end CLI tests.
+4. Add structured tool-call handling.
+5. Add approval-gated file editing.
+6. Add command execution with explicit approval.
+7. Add end-to-end CLI tests.
 
 Starting with read-only tools is safer than beginning with unrestricted file
 writes or shell execution.
@@ -434,16 +471,16 @@ Build next:
 
 ### Milestone 3 — Model integration
 
-**Status: Not started**
+**Status: Provider connections implemented; agent integration remains**
 
-Build:
+Completed: provider-neutral interface, Gemini and Groq SDK adapters, environment
+configuration, transient retries, optional fallback, and `clyro ping`.
 
-- Provider abstraction
-- API configuration
-- Prompt construction
+Remaining:
+
+- Prompt and context construction
 - Streaming responses
-- Retry and error handling
-- Conversation state
+- Conversation state and agent loop
 
 ### Milestone 4 — Read-only coding assistance
 
