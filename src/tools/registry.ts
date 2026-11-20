@@ -1,8 +1,14 @@
+import type { ZodType } from "zod";
+import { zodToJsonSchema } from "../providers/schema.js";
 import { redactSecrets } from "../security/redact.js";
 import { ToolFailure } from "./errors.js";
 import type { AgentPhase, Permission, ToolContext, ToolDefinition, ToolErrorCode, ToolResult } from "./types.js";
+import type { ToolDeclaration } from "../providers/types.ts";
 
 interface RegisteredTool {
+  name: string;
+  description: string;
+  schema: ZodType;
   permission: Permission;
   phases: readonly AgentPhase[];
   modelCallable: boolean;
@@ -27,6 +33,9 @@ export class ToolRegistry {
   register<S extends import("zod").ZodType>(definition: ToolDefinition<S>): void {
     if (this.tools.has(definition.name)) throw new Error(`Duplicate tool registration: ${definition.name}`);
     this.tools.set(definition.name, {
+      name: definition.name,
+      description: definition.description,
+      schema: definition.schema,
       permission: definition.permission,
       phases: definition.phases,
       modelCallable: definition.modelCallable,
@@ -39,6 +48,25 @@ export class ToolRegistry {
     });
   }
 
+  getModelTools(phase: AgentPhase): ToolDeclaration[] {
+    const availableTools: ToolDeclaration[] = [];
+  
+    for (const tool of this.tools.values()) {
+      if (!tool.modelCallable) continue;
+      if (!tool.phases.includes(phase)) continue;
+      if (!phasePermissions[phase].has(tool.permission)) continue;
+      if (tool.permission === "control") continue;
+  
+      availableTools.push({
+        name: tool.name,
+        description: tool.description,
+        schema: zodToJsonSchema(tool.schema),
+      });
+    }
+  
+    return availableTools;
+  }
+  
   async execute(name: string, rawArgs: unknown, context: ToolContext): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) return errorResult("UNKNOWN_TOOL", "Unknown tool.");

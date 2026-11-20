@@ -8,12 +8,65 @@ import { PathGuard } from "./security/path-guard.js";
 import { createReadOnlyToolRegistry } from "./tools/create-registry.js";
 import type { ToolContext } from "./tools/types.js";
 import { runPing } from "./cli/commands/ping.js";
+import { runAgent } from "./agent.js";
+import { createProviderRouter } from "./providers/fallback.js";
 
 const program = new Command();
 
 program.name("clyro").description("A local-first AI coding agent CLI");
 
 program.command("ping").description("Check configured model provider connectivity").action(runPing);
+
+
+program
+  .command("agent")
+  .description("Ask Clyro to investigate your repository")
+  .argument("<task>", "Task for the coding agent")
+  .action(async (task: string) => {
+    const repositoryRoot = process.cwd();
+    const controller = new AbortController();
+
+    const context: ToolContext = {
+      pathGuard: await PathGuard.create(repositoryRoot),
+      repositoryRoot,
+      phase: "investigate",
+      limits: {
+        maxOutputChars: 16_000,
+        maxFileBytes: 1_000_000,
+        maxReadOutputChars: 8_000,
+        maxSearchMatches: 100,
+        maxListResults: 200,
+        maxDirectoryDepth: 8,
+      },
+      signal: controller.signal,
+      filesRead: new Map(),
+    };
+
+    console.log("\nClyro is investigating your repository...\n");
+
+    try {
+      const provider = createProviderRouter();
+      const registry = createReadOnlyToolRegistry();
+
+      const result = await runAgent(task, {
+        provider,
+        registry,
+        context,
+      });
+
+      console.log("\nClyro's answer:\n");
+      console.log(result.text);
+
+      console.log("\nExecution summary");
+      console.log(`Iterations: ${result.iterations}`);
+      console.log(`Tool calls: ${result.toolCalls}`);
+      console.log(`Input tokens: ${result.usage.inputTokens}`);
+      console.log(`Output tokens: ${result.usage.outputTokens}`);
+    } finally {
+      // No persistent resources to clean up yet.
+    }
+  });
+
 
 program
   .command("inspect")
